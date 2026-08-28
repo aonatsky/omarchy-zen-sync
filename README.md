@@ -66,7 +66,7 @@ omarchy theme set <name>
 ## Install
 
 ```bash
-git clone https://github.com/r3b1s/omarchy-zen-sync.git
+git clone https://github.com/aonatsky/omarchy-zen-sync.git
 cd omarchy-zen-sync
 ./install.sh
 ```
