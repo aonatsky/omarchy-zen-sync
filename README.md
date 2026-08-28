@@ -72,6 +72,27 @@ omarchy theme set <name>
 
 ## Install
 
+### As an Omarchy plugin (recommended)
+
+```bash
+omarchy plugin add https://github.com/aonatsky/omarchy-zen-sync.git --enable
+```
+
+That's it. A headless shell service watches the active theme and re-renders /
+restarts Zen whenever it changes. The first run wires your Zen profiles
+automatically (enables the userChrome pref and symlinks `userChrome.css`; an
+existing `userChrome.css` is backed up, never deleted).
+
+To remove it later: `omarchy plugin remove io.github.aonatsky.zen-sync`, then
+run `./uninstall.sh` from a clone if you also want the symlinks and rendered
+CSS gone.
+
+### Manual (hook mode)
+
+An alternative that doesn't involve the Omarchy shell: a theme-set hook plus
+Omarchy's native template rendering. Don't combine it with the plugin, pick
+one.
+
 ```bash
 git clone https://github.com/aonatsky/omarchy-zen-sync.git
 cd omarchy-zen-sync
