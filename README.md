@@ -7,7 +7,8 @@ No patched builds, no Zen Mods, no manual color picking. The whole thing is one
 CSS template rendered by Omarchy's native theming engine, plus a tiny hook that
 restarts Zen so it picks the colors up.
 
-The same Omarchy theme in two Zen Spaces — each Space gets its own gradient tint:
+The same Omarchy theme (**Quattro Light**) in two Zen Spaces — each Space gets
+its own gradient tint:
 
 | Space 1 — `accent` tint | Space 2 — `magenta` tint |
 |---|---|
