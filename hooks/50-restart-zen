@@ -1,0 +1,18 @@
+#!/bin/bash
+# Restart Zen Browser so it reloads userChrome.css with the new theme colors.
+# Zen restores the previous session on startup (browser.startup.page=3),
+# so open tabs come back. Does nothing when Zen isn't running.
+
+pgrep -x zen-bin >/dev/null || exit 0
+
+pkill -TERM -x zen-bin
+
+for _ in $(seq 1 50); do
+  pgrep -x zen-bin >/dev/null || break
+  sleep 0.1
+done
+
+# Launch via Hyprland so zen gets the real session environment (DBus/portal);
+# launching from a hook caller's shell can lose it and the content
+# color-scheme falls back to light.
+hyprctl dispatch exec zen-browser >/dev/null 2>&1 || setsid -f zen-browser >/dev/null 2>&1
