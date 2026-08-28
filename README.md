@@ -7,6 +7,12 @@ No patched builds, no Zen Mods, no manual color picking. The whole thing is one
 CSS template rendered by Omarchy's native theming engine, plus a tiny hook that
 restarts Zen so it picks the colors up.
 
+The same Omarchy theme in two Zen Spaces — each Space gets its own gradient tint:
+
+| Space 1 — `accent` tint | Space 2 — `magenta` tint |
+|---|---|
+| ![Space 1](assets/profile1.png) | ![Space 2](assets/profile2.png) |
+
 ## How it works
 
 Zen derives its entire UI palette from a handful of root CSS variables
