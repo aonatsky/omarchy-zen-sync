@@ -1,7 +1,7 @@
-/* Omarchy -> Zen Browser color sync.
- * Rendered by Omarchy from ~/.config/omarchy/themed/zen-userchrome.css.tpl
- * on every theme change. Zen loads it via the userChrome.css symlink in the
- * profile's chrome/ directory (restart Zen to pick up a theme switch).
+/* Omarchy -> Zen Browser color sync (omarchy-zen-sync).
+ * Rendered by sync.sh from zen-userchrome.css.tpl on every theme change. Zen
+ * loads it via the userChrome.css symlink in the profile's chrome/ directory
+ * (sync.sh restarts Zen when the rendered CSS changes).
  *
  * Strategy: override only the root variables Zen derives its palette from
  * (see zen-styles/zen-theme.css in omni.ja) and let Zen's color-mix cascade

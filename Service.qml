@@ -4,8 +4,13 @@ import Quickshell.Io
 
 // Headless service: watches the active Omarchy theme's colors.toml and runs
 // sync.sh, which renders Zen's userChrome.css and restarts Zen only when the
-// rendered CSS actually changed. Also runs once on shell startup, which makes
+// rendered CSS actually changed. Also runs once on startup, which makes
 // enabling the plugin self-installing (profile wiring is idempotent).
+//
+// The FileView never loads the file's content (preload: false, text() unused):
+// it is only a change signal, so an unexpected file type can't block the
+// shell. All reads and validation happen in sync.sh with size-capped
+// regular-file checks.
 Item {
   id: root
 
@@ -13,26 +18,40 @@ Item {
   property var shell: null
 
   readonly property string home: Quickshell.env("HOME")
-  readonly property string syncScript: Qt.resolvedUrl("sync.sh").toString().replace("file://", "")
+  readonly property string syncScript: {
+    const url = Qt.resolvedUrl("sync.sh").toString()
+    return decodeURIComponent(url.replace(/^file:\/\//, ""))
+  }
 
   property bool syncPending: false
 
+  readonly property string colorsPath: root.home + "/.local/state/omarchy/current/theme/colors.toml"
+
+  // Theme switches replace colors.toml, which kills the underlying file
+  // watch. Re-arm it by resetting the path; with preload false this never
+  // reads the file's content.
+  function rearmWatch() {
+    colorsFile.path = ""
+    colorsFile.path = root.colorsPath
+  }
+
   property FileView colorsFile: FileView {
-    path: root.home + "/.local/state/omarchy/current/theme/colors.toml"
+    path: root.colorsPath
+    preload: false
     watchChanges: true
     printErrors: false
-    onLoaded: syncTimer.restart()
-    // Theme switches replace the file; route through reload() so the watch
-    // re-arms and onLoaded fires with fresh content.
-    onFileChanged: reload()
+    onFileChanged: syncTimer.restart()
   }
 
   // Debounce: a theme switch touches the state dir several times in a row.
+  // By the time the timer fires the new colors.toml is in place, so this is
+  // also the safe moment to re-arm the watch.
   Timer {
     id: syncTimer
     interval: 800
     repeat: false
     onTriggered: {
+      root.rearmWatch()
       if (syncProcess.running) {
         root.syncPending = true
       } else {
@@ -51,4 +70,6 @@ Item {
       }
     }
   }
+
+  Component.onCompleted: syncTimer.restart()
 }

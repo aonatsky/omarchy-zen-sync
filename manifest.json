@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.aonatsky.zen-sync",
   "name": "Zen Theme Sync",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "Andrii Onatskyi",
   "license": "MIT",
   "description": "Sync Zen Browser colors with the active Omarchy theme: renders userChrome.css from the theme palette, gives every Zen Space its own gradient tint, and restarts Zen when the theme changes.",

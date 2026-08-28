@@ -27,11 +27,14 @@ The pipeline:
 
 ```
 omarchy theme set <name>
-  └─ renders ~/.config/omarchy/themed/zen-userchrome.css.tpl   (native Omarchy templates)
-       └─ ~/.local/state/omarchy/current/theme/zen-userchrome.css
+  └─ colors.toml changes → sync.sh renders zen-userchrome.css.tpl
+       └─ ~/.local/state/omarchy-zen-sync/zen-userchrome.css
             └─ symlinked as userChrome.css in your Zen profile
-  └─ theme-set hook gracefully restarts Zen (session restores)
+  └─ Zen is gracefully restarted, only if the rendered CSS changed
 ```
+
+In plugin mode a headless shell service watches `colors.toml`; in manual mode
+a `theme-set` hook runs the same renderer.
 
 ## Features
 
@@ -89,9 +92,8 @@ CSS gone.
 
 ### Manual (hook mode)
 
-An alternative that doesn't involve the Omarchy shell: a theme-set hook plus
-Omarchy's native template rendering. Don't combine it with the plugin, pick
-one.
+An alternative that doesn't involve the Omarchy shell. Don't combine it with
+the plugin, pick one.
 
 ```bash
 git clone https://github.com/aonatsky/omarchy-zen-sync.git
@@ -99,18 +101,11 @@ cd omarchy-zen-sync
 ./install.sh
 ```
 
-The installer:
-
-1. copies the template to `~/.config/omarchy/themed/zen-userchrome.css.tpl`
-2. installs the restart hook to `~/.config/omarchy/hooks/theme-set.d/50-restart-zen`
-3. renders the CSS once for your current theme
-4. finds every used Zen profile, enables
-   `toolkit.legacyUserProfileCustomizations.stylesheets`, and symlinks
-   `chrome/userChrome.css` to the rendered file (an existing `userChrome.css`
-   is backed up, never deleted)
-
-Then restart Zen once (or run the hook: `~/.config/omarchy/hooks/theme-set.d/50-restart-zen`).
-From that point on, every `omarchy theme set <name>` does everything by itself.
+The installer copies the renderer and template to
+`~/.local/share/omarchy-zen-sync/`, installs a `theme-set` hook that runs it,
+and runs it once (which wires your Zen profiles the same way plugin mode
+does). From that point on, every `omarchy theme set <name>` does everything by
+itself.
 
 ## Customization
 
@@ -142,6 +137,22 @@ Space gradients to default in the picker if the stale state bothers you.
 **Colors didn't change after `omarchy theme set`.** The theme must ship a
 `colors.toml` (all stock themes do). Also check that the hook is executable:
 `ls -l ~/.config/omarchy/hooks/theme-set.d/50-restart-zen`.
+
+## Security
+
+The renderer treats all inputs as untrusted data:
+
+- Theme keys/values are never used to build executable syntax. Keys must
+  match `[a-z0-9_]+` and values must match an allowlisted grammar (hex color,
+  `r,g,b` triplet, or `light`/`dark`); anything else is dropped.
+- `profiles.ini` entries are canonicalized and must resolve strictly beneath
+  the profile root; absolute, escaping, symlinked, or non-directory entries
+  are rejected. Target files are type-checked before any write.
+- Every read is a size-capped regular-file read (symlinks, FIFOs, and devices
+  are refused). Every write goes through an unpredictable same-directory
+  temporary followed by an atomic rename. The shell service never loads the
+  watched file's content; it only reacts to change events.
+- Nothing is fetched or executed from the network at runtime.
 
 ## Uninstall
 
