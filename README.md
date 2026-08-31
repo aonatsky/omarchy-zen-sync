@@ -67,8 +67,9 @@ a `theme-set` hook runs the same renderer.
 
 ## Requirements
 
-- Omarchy with native user-template support — the version that renders
-  `~/.config/omarchy/themed/*.tpl` and ships `omarchy-theme-color`
+- Omarchy that ships `omarchy-theme-color` (present since themed templates
+  landed); `python3` for descriptor-bound file reads (in Omarchy's dependency
+  tree already)
 - Zen Browser (AUR `zen-browser-bin`, tarball, or flatpak)
 - Hyprland (used to restart Zen with the correct session environment; falls
   back to `setsid` elsewhere)
@@ -135,8 +136,8 @@ stored per-Space gradient, which this project overrides — it's inert. Reset th
 Space gradients to default in the picker if the stale state bothers you.
 
 **Colors didn't change after `omarchy theme set`.** The theme must ship a
-`colors.toml` (all stock themes do). Also check that the hook is executable:
-`ls -l ~/.config/omarchy/hooks/theme-set.d/50-restart-zen`.
+`colors.toml` (all stock themes do). In hook mode, also check that the hook is
+executable: `ls -l ~/.config/omarchy/hooks/theme-set.d/50-zen-sync`.
 
 ## Security
 
@@ -148,10 +149,14 @@ The renderer treats all inputs as untrusted data:
 - `profiles.ini` entries are canonicalized and must resolve strictly beneath
   the profile root; absolute, escaping, symlinked, or non-directory entries
   are rejected. Target files are type-checked before any write.
-- Every read is a size-capped regular-file read (symlinks, FIFOs, and devices
-  are refused). Every write goes through an unpredictable same-directory
-  temporary followed by an atomic rename. The shell service never loads the
-  watched file's content; it only reacts to change events.
+- Every security-sensitive read is descriptor-bound: one helper opens with
+  `O_NOFOLLOW|O_NONBLOCK`, verifies owner/type/size through `fstat`, and reads
+  through that same descriptor, so a file swapped in mid-operation can't
+  redirect the read or block it (symlinks, FIFOs, devices, foreign-owned and
+  oversized files are refused at the descriptor). External tools only reopen
+  private, verified copies. Every write goes through an unpredictable
+  same-directory temporary followed by an atomic rename. The shell service
+  never loads the watched file's content; it only reacts to change events.
 - Nothing is fetched or executed from the network at runtime.
 
 ## Uninstall

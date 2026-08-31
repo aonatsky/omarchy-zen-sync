@@ -5,15 +5,18 @@
 # (manual mode). Safe to run by hand.
 #
 # Hardening notes:
+# - Every security-sensitive read is descriptor-bound: one helper opens with
+#   O_NOFOLLOW|O_NONBLOCK, verifies owner/type/size via fstat, and reads
+#   through that same descriptor (no check-then-use by pathname). External
+#   tools only ever reopen private, verified copies.
 # - Theme keys/values are treated strictly as data: keys must match
 #   [a-z0-9_]+, values must match an allowlisted color grammar. Nothing from
-#   the theme is ever used to build executable syntax (no generated sed/awk).
+#   the theme is ever used to build executable syntax.
 # - profiles.ini entries are canonicalized and must resolve strictly beneath
 #   the profile root; escaping, absolute, symlinked, or non-directory entries
 #   are rejected.
-# - Every read is a size-capped regular-file read (no symlinks, FIFOs, or
-#   devices); every write goes through an unpredictable same-directory
-#   temporary followed by an atomic rename.
+# - Every write goes through an unpredictable same-directory temporary
+#   followed by an atomic rename.
 set -euo pipefail
 
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -22,38 +25,79 @@ COLORS="$HOME/.local/state/omarchy/current/theme/colors.toml"
 OUT_DIR="$HOME/.local/state/omarchy-zen-sync"
 OUT="$OUT_DIR/zen-userchrome.css"
 MAX_INPUT_BYTES=65536
+MAX_USERJS_BYTES=1048576
 PREF_LINE='user_pref("toolkit.legacyUserProfileCustomizations.stylesheets", true);'
 
 # Keep ${var//pat/repl} replacements literal (bash 5.2's patsub_replacement
 # would otherwise expand & and \ inside the replacement).
 shopt -u patsub_replacement 2>/dev/null || true
 
-# Regular file, not a symlink, non-empty, size-capped. Refuses FIFOs, devices,
-# and oversized inputs before any read happens.
-safe_regular() {
-  local f="$1" size
-  [[ -f $f && ! -L $f ]] || return 1
-  size=$(stat -c %s -- "$f" 2>/dev/null) || return 1
-  ((size > 0 && size <= MAX_INPUT_BYTES))
+command -v omarchy-theme-color >/dev/null 2>&1 || exit 0
+command -v python3 >/dev/null 2>&1 || exit 0
+
+# Descriptor-bound safe read. Opens with O_NOFOLLOW|O_NONBLOCK (an unexpected
+# symlink or writer-less FIFO fails or is detected instead of blocking),
+# verifies owner/type/size through fstat on the open descriptor, and streams
+# at most max_bytes from that same descriptor. Returns non-zero for anything
+# that isn't a caller-owned, non-empty, size-capped regular file.
+read_safe() { # <path> <max_bytes>
+  python3 - "$1" "$2" <<'PY'
+import os, stat, sys
+path, limit = sys.argv[1], int(sys.argv[2])
+try:
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+except OSError:
+    sys.exit(1)
+try:
+    st = os.fstat(fd)
+    if not stat.S_ISREG(st.st_mode):
+        sys.exit(1)
+    if st.st_uid != os.getuid():
+        sys.exit(1)
+    if not (0 < st.st_size <= limit):
+        sys.exit(1)
+    remaining = limit
+    out = sys.stdout.buffer
+    while remaining > 0:
+        chunk = os.read(fd, min(65536, remaining))
+        if not chunk:
+            break
+        out.write(chunk)
+        remaining -= len(chunk)
+finally:
+    os.close(fd)
+PY
 }
 
-command -v omarchy-theme-color >/dev/null 2>&1 || exit 0
-safe_regular "$COLORS" || exit 0
-safe_regular "$TPL" || exit 0
+# --- private work directory ----------------------------------------------------
 
-# --- render ------------------------------------------------------------------
+mkdir -p -- "$OUT_DIR"
+chmod 700 -- "$OUT_DIR"
+[[ -d $OUT_DIR && ! -L $OUT_DIR ]] || exit 0
+
+# --- read inputs (descriptor-bound) ---------------------------------------------
+
+tpl_content=$(read_safe "$TPL" "$MAX_INPUT_BYTES") || exit 0
+colors_content=$(read_safe "$COLORS" "$MAX_INPUT_BYTES") || exit 0
+
+# omarchy-theme-color reopens its --file argument by pathname, so hand it a
+# private, already-verified copy instead of the original path.
+colors_tmp=$(mktemp -- "$OUT_DIR/.colors.XXXXXX")
+trap 'rm -f -- "$colors_tmp"' EXIT
+printf '%s\n' "$colors_content" >"$colors_tmp"
+
+# --- render ---------------------------------------------------------------------
 
 KEY_RE='^[a-z0-9_]+$'
 VALUE_RE='^(#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?|[0-9]{1,3}(,[0-9]{1,3}){2}|light|dark)$'
 
 render_css() {
-  local content key value
-  content=$(<"$TPL")
+  local content="$tpl_content" key value
   while IFS=$'\t' read -r key value; do
     [[ $key =~ $KEY_RE ]] || continue
     [[ $value =~ $VALUE_RE ]] || continue
     content=${content//"{{ ${key} }}"/${value}}
-  done < <(omarchy-theme-color --file "$COLORS" --all 2>/dev/null | head -c "$MAX_INPUT_BYTES")
+  done < <(omarchy-theme-color --file "$colors_tmp" --all 2>/dev/null | head -c "$MAX_INPUT_BYTES")
   # A leftover token means a missing or rejected value: don't ship broken CSS.
   [[ $content != *'{{'* ]] || return 1
   printf '%s\n' "$content"
@@ -61,10 +105,7 @@ render_css() {
 
 css=$(render_css) || exit 0
 
-# --- write the rendered CSS atomically ----------------------------------------
-
-mkdir -p -m 700 -- "$OUT_DIR"
-[[ -d $OUT_DIR && ! -L $OUT_DIR ]] || exit 0
+# --- write the rendered CSS atomically -------------------------------------------
 
 changed=1
 tmp=$(mktemp -- "$OUT_DIR/.render.XXXXXX")
@@ -76,11 +117,11 @@ else
   mv -f -- "$tmp" "$OUT"
 fi
 
-# --- wire Zen profiles (idempotent) --------------------------------------------
+# --- wire Zen profiles (idempotent) -----------------------------------------------
 
 wire_profile() {
   local base_real="$1" profile="$2"
-  local profile_real chrome target user_js tmp_link tmp_js
+  local profile_real chrome target user_js tmp_link tmp_js user_js_content
 
   # The profile must be a real directory that canonicalizes strictly beneath
   # the profile root.
@@ -109,16 +150,15 @@ wire_profile() {
   ln -sn -- "$OUT" "$tmp_link" || return 0
   mv -Tf -- "$tmp_link" "$target" || { rm -f -- "$tmp_link"; return 0; }
 
-  # user.js: only ever touch a regular, sanely sized file (or create one).
+  # user.js: read the existing file through the descriptor-bound helper (a
+  # symlink, FIFO, device, foreign-owned, or oversized file skips the
+  # profile), then replace atomically.
   user_js="$profile_real/user.js"
-  if [[ -L $user_js ]] || [[ -e $user_js && ! -f $user_js ]]; then
-    return 0
-  fi
-  if [[ -f $user_js ]]; then
-    safe_regular "$user_js" || return 0
-    grep -qxF -- "$PREF_LINE" "$user_js" && return 0
+  if [[ -e $user_js || -L $user_js ]]; then
+    user_js_content=$(read_safe "$user_js" "$MAX_USERJS_BYTES") || return 0
+    grep -qxF -- "$PREF_LINE" <<<"$user_js_content" && return 0
     tmp_js=$(mktemp -- "$profile_real/.user.js.XXXXXX")
-    grep -vF -- '"toolkit.legacyUserProfileCustomizations.stylesheets"' "$user_js" >"$tmp_js" || true
+    grep -vF -- '"toolkit.legacyUserProfileCustomizations.stylesheets"' <<<"$user_js_content" >"$tmp_js" || true
   else
     tmp_js=$(mktemp -- "$profile_real/.user.js.XXXXXX")
   fi
@@ -128,7 +168,7 @@ wire_profile() {
 
 for base in "$HOME/.config/zen" "$HOME/.zen" "$HOME/.var/app/app.zen_browser.zen/.zen"; do
   ini="$base/profiles.ini"
-  safe_regular "$ini" || continue
+  ini_content=$(read_safe "$ini" "$MAX_INPUT_BYTES") || continue
   base_real=$(realpath -e -- "$base" 2>/dev/null) || continue
 
   while IFS= read -r rel; do
@@ -139,10 +179,10 @@ for base in "$HOME/.config/zen" "$HOME/.zen" "$HOME/.var/app/app.zen_browser.zen
     esac
     [[ -f "$base/$rel/prefs.js" ]] || continue
     wire_profile "$base_real" "$base/$rel"
-  done < <(awk -F= '/^IsRelative=1/{rel=1} /^Path=/{path=$2} /^\[/{if (rel && path) print path; rel=0; path=""} END{if (rel && path) print path}' "$ini")
+  done < <(awk -F= '/^IsRelative=1/{rel=1} /^Path=/{path=$2} /^\[/{if (rel && path) print path; rel=0; path=""} END{if (rel && path) print path}' <<<"$ini_content")
 done
 
-# --- restart Zen only when the CSS actually changed ---------------------------
+# --- restart Zen only when the CSS actually changed --------------------------------
 
 ((changed)) || exit 0
 pgrep -x zen-bin >/dev/null || exit 0
