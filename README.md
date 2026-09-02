@@ -27,7 +27,7 @@ The pipeline:
 
 ```
 omarchy theme set <name>
-  └─ colors.toml changes → sync.sh renders zen-userchrome.css.tpl
+  └─ colors.toml changes → sync.py renders zen-userchrome.css.tpl
        └─ ~/.local/state/omarchy-zen-sync/zen-userchrome.css
             └─ symlinked as userChrome.css in your Zen profile
   └─ Zen is gracefully restarted, only if the rendered CSS changed
@@ -110,10 +110,11 @@ itself.
 
 ## Customization
 
-Everything lives in one file: `~/.config/omarchy/themed/zen-userchrome.css.tpl`.
-Any Omarchy color key works as `{{ key }}` (plus `{{ key_rgb }}`, `{{ key_strip }}`,
-`{{ mode }}`, and `{{ mix a b 30% }}`). After editing, re-apply your theme:
-`omarchy theme set "$(omarchy theme current)"`.
+Everything lives in one file, `zen-userchrome.css.tpl`, next to the renderer
+(the plugin directory in plugin mode, `~/.local/share/omarchy-zen-sync/` in
+hook mode). Any Omarchy color key works as `{{ key }}`, including `{{ mode }}`
+(`light`/`dark`) and derived shades like `{{ lighter_background }}`. After
+editing, re-apply your theme: `omarchy theme set "$(omarchy theme current)"`.
 
 Common tweaks:
 
@@ -141,21 +142,30 @@ executable: `ls -l ~/.config/omarchy/hooks/theme-set.d/50-zen-sync`.
 
 ## Security
 
-The renderer treats all inputs as untrusted data:
+The renderer (`sync.py`) treats all inputs as untrusted data and all
+filesystem access is descriptor-bound:
 
+- Directory anchors are canonicalized once, then walked
+  component-by-component with `O_NOFOLLOW|O_DIRECTORY`; the resulting
+  directory descriptors are held, and every read, temporary creation,
+  rename, backup, and symlink runs *at* those descriptors (`openat`,
+  `renameat`, `linkat`, `symlinkat`). A swapped or symlinked intermediate
+  component fails the walk at use time instead of being followed.
+- File reads open with `O_NOFOLLOW|O_NONBLOCK` and verify type, owner, and
+  size via `fstat` on the open descriptor before reading through that same
+  descriptor (symlinks, FIFOs, devices, foreign-owned, and oversized files
+  are refused without blocking).
+- `omarchy-theme-color` never sees an on-disk path: the verified
+  `colors.toml` bytes are passed as an in-memory file (`memfd`) through
+  `/proc/self/fd`.
 - Theme keys/values are never used to build executable syntax. Keys must
   match `[a-z0-9_]+` and values must match an allowlisted grammar (hex color,
-  `r,g,b` triplet, or `light`/`dark`); anything else is dropped.
-- `profiles.ini` entries are canonicalized and must resolve strictly beneath
-  the profile root; absolute, escaping, symlinked, or non-directory entries
-  are rejected. Target files are type-checked before any write.
-- Every security-sensitive read is descriptor-bound: one helper opens with
-  `O_NOFOLLOW|O_NONBLOCK`, verifies owner/type/size through `fstat`, and reads
-  through that same descriptor, so a file swapped in mid-operation can't
-  redirect the read or block it (symlinks, FIFOs, devices, foreign-owned and
-  oversized files are refused at the descriptor). External tools only reopen
-  private, verified copies. Every write goes through an unpredictable
-  same-directory temporary followed by an atomic rename. The shell service
+  `r,g,b` triplet, or `light`/`dark`); anything else is dropped, and an
+  unresolved template token aborts the render.
+- `profiles.ini` entries are component-validated (no absolute, empty, dot,
+  or backslash segments) and walked from the held profile-root descriptor.
+- Every write is an unpredictable `O_CREAT|O_EXCL` temporary in the
+  destination directory followed by an atomic rename. The shell service
   never loads the watched file's content; it only reacts to change events.
 - Nothing is fetched or executed from the network at runtime.
 

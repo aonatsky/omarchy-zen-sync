@@ -2,7 +2,7 @@
 # Manual (hook mode) installer, for setups that don't run Omarchy shell
 # plugins. Copies the renderer and template to ~/.local/share/omarchy-zen-sync,
 # installs a theme-set hook that runs it, and runs it once now. The renderer
-# (sync.sh) is the same hardened code path the plugin uses.
+# (sync.py) is the same hardened code path the plugin uses.
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,18 +15,19 @@ die()  { printf '\033[1;31mxx\033[0m %s\n' "$*" >&2; exit 1; }
 
 command -v omarchy-theme-color >/dev/null 2>&1 ||
   die "omarchy-theme-color not found. This tool needs an Omarchy version that ships it."
+command -v python3 >/dev/null 2>&1 ||
+  die "python3 not found."
 
 mkdir -p -m 700 -- "$SHARE_DIR"
-cp -- "$REPO_DIR/sync.sh" "$REPO_DIR/zen-userchrome.css.tpl" "$SHARE_DIR/"
-chmod +x -- "$SHARE_DIR/sync.sh"
+cp -- "$REPO_DIR/sync.py" "$REPO_DIR/zen-userchrome.css.tpl" "$SHARE_DIR/"
 info "Renderer installed: $SHARE_DIR"
 
 mkdir -p -- "$HOOK_DIR"
 tmp=$(mktemp -- "$HOOK_DIR/.50-zen-sync.XXXXXX")
-printf '#!/bin/bash\nexec "%s/sync.sh"\n' "$SHARE_DIR" >"$tmp"
+printf '#!/bin/bash\nexec python3 "%s/sync.py"\n' "$SHARE_DIR" >"$tmp"
 chmod +x -- "$tmp"
 mv -f -- "$tmp" "$HOOK"
 info "Hook installed: $HOOK"
 
-"$SHARE_DIR/sync.sh"
+python3 "$SHARE_DIR/sync.py"
 info "Initial sync done. Every 'omarchy theme set <name>' now re-renders Zen's colors and restarts Zen when needed."

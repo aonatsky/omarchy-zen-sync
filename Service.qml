@@ -3,14 +3,14 @@ import Quickshell
 import Quickshell.Io
 
 // Headless service: watches the active Omarchy theme's colors.toml and runs
-// sync.sh, which renders Zen's userChrome.css and restarts Zen only when the
+// sync.py, which renders Zen's userChrome.css and restarts Zen only when the
 // rendered CSS actually changed. Also runs once on startup, which makes
 // enabling the plugin self-installing (profile wiring is idempotent).
 //
 // The FileView never loads the file's content (preload: false, text() unused):
 // it is only a change signal, so an unexpected file type can't block the
-// shell. All reads and validation happen in sync.sh with size-capped
-// regular-file checks.
+// shell. All reads and validation happen in sync.py with descriptor-bound
+// file I/O.
 Item {
   id: root
 
@@ -19,7 +19,7 @@ Item {
 
   readonly property string home: Quickshell.env("HOME")
   readonly property string syncScript: {
-    const url = Qt.resolvedUrl("sync.sh").toString()
+    const url = Qt.resolvedUrl("sync.py").toString()
     return decodeURIComponent(url.replace(/^file:\/\//, ""))
   }
 
@@ -62,7 +62,7 @@ Item {
 
   Process {
     id: syncProcess
-    command: ["bash", root.syncScript]
+    command: ["python3", root.syncScript]
     onExited: {
       if (root.syncPending) {
         root.syncPending = false
